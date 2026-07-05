@@ -69,7 +69,7 @@ async function generateImage(kural) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/images",
     {
-  model: "black-forest-labs/flux.2-klein-4b",
+  model: "bytedance-seed/seedream-4.5",
   prompt,
 },
     {
@@ -83,8 +83,13 @@ async function generateImage(kural) {
     }
   );
 
-    console.log("OpenRouter image response:", JSON.stringify(response.data));
-  const url = response.data?.data?.[0]?.url || response.data?.url || null;
+      const item = response.data?.data?.[0];
+  let url = item?.url || null;
+  // If model returns base64, convert to data URI
+  if (!url && item?.b64_json) {
+    url = `data:image/jpeg;base64,${item.b64_json}`;
+  }
+  console.log("Image URL obtained:", url ? "yes" : "no");
   if (url) imageCache.set(cacheKey, url);
   return url;
 }
