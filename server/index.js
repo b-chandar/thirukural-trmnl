@@ -1,39 +1,28 @@
 const express = require("express");
 const axios = require("axios");
 const NodeCache = require("node-cache");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Cache kural for 24h, image URL for 23h
 const kuralCache = new NodeCache({ stdTTL: 86400 });
 const imageCache = new NodeCache({ stdTTL: 82800 });
 
-// ─────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────
+const IMAGE_DIR = path.join(__dirname, "images");
+if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR);
 
-/**
- * Deterministic kural number for today (UTC).
- * Same result for any call within the same UTC day.
- * Cycles through 1–1330.
- */
 function dailyKuralNumber() {
   const now = new Date();
-  // Days since Unix epoch (UTC)
   const dayIndex = Math.floor(now.getTime() / (1000 * 60 * 60 * 24));
   return (dayIndex % 1330) + 1;
 }
 
-/**
- * Fetch a Thirukural by number.
- * Uses https://tamil-kural-api.vercel.app/api/kural/{num}
- */
 async function fetchKural(num) {
   const cacheKey = `kural_${num}`;
   const cached = kuralCache.get(cacheKey);
   if (cached) return cached;
-
   const response = await axios.get(
     `https://tamil-kural-api.vercel.app/api/kural/${num}`,
     { timeout: 10000 }
@@ -42,14 +31,7 @@ async function fetchKural(num) {
   return response.data;
 }
 
-/**
- * Generate an ink-sketch image via OpenRouter's Image API.
- * Model: black-forest-labs/flux-2-klein (cheap, ~$0.014/image, great for line art)
- *
- * Requires env var: OPENROUTER_API_KEY
- * Falls back gracefully if key not set or generation fails.
- */
-async function generateImage(kural) {
+async function generateImage(kural, baseUrl) {
   const cacheKey = `img_${kural.number}`;
   const cached = imageCache.get(cacheKey);
   if (cached) return cached;
@@ -68,10 +50,7 @@ async function generateImage(kural) {
 
   const response = await axios.post(
     "https://openrouter.ai/api/v1/images",
-    {
-  model: "bytedance-seed/seedream-4.5",
-  prompt,
-},
+    { model: "bytedance-seed/seedream-4.5", prompt },
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
@@ -83,62 +62,62 @@ async function generateImage(kural) {
     }
   );
 
-        const item = response.data?.data?.[0];
-  const url = item?.url || null;
-  // Only use hosted URLs — base64 is too large for TRMNL
-  console.log("Image URL obtained:", url ? url : "none");
-  if (url) imageCache.set(cacheKey, url);
-  return url;
+  const item = response.data?.data?.[0];
+  let hostedUrl = null;
+
+  if (item?.url) {
+    hostedUrl = item.url;
+  } else if (item?.b64_json) {
+    const filename = `kural_${kural.number}.jpg`;
+    const filepath = path.join(IMAGE_DIR, filename);
+    fs.writeFileSync(filepath, Buffer.from(item.b64_json, "base64"));
+    hostedUrl = `${baseUrl}/image/${filename}`;
+    console.log("Saved image to disk:", filename);
+  }
+
+  if (hostedUrl) imageCache.set(cacheKey, hostedUrl);
+  console.log("Image URL:", hostedUrl || "none");
+  return hostedUrl;
 }
 
-// ─────────────────────────────────────────────
-// Route: GET /data
-// TRMNL polls this endpoint every refresh cycle
-// ─────────────────────────────────────────────
+app.use("/image", express.static(IMAGE_DIR));
+
 app.get("/data", async (req, res) => {
   try {
     const num = dailyKuralNumber();
     const kural = await fetchKural(num);
-
     const lines = Array.isArray(kural.kural) ? kural.kural : [];
     const line1 = lines[0] || "";
     const line2 = lines[1] || "";
     const meaning_en = kural.meaning?.en || "";
-    // Tamil meaning — prefer mu_va (concise), fall back to salamon
     const meaning_ta = kural.meaning?.ta_mu_va || kural.meaning?.ta_salamon || "";
     const chapter = kural.chapter || "";
     const section = kural.section || "";
     const number = kural.number || num;
 
-    // Generate image only if API key is present
     let image_url = null;
     if (process.env.OPENROUTER_API_KEY) {
       try {
-        image_url = await generateImage(kural);
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        image_url = await generateImage(kural, baseUrl);
       } catch (imgErr) {
         console.error("Image generation failed:", imgErr.message);
-        // Non-fatal: plugin still renders text without image
       }
     }
 
-    res.json({
-      number,
-      line1,
-      line2,
-      meaning_en,
-      meaning_ta,
-      chapter,
-      section,
-      image_url,
-      generated_at: new Date().toISOString(),
-    });
+    res.json({ number, line1, line2, meaning_en, meaning_ta, chapter, section, image_url });
   } catch (err) {
     console.error("Error in /data:", err.message);
     res.status(500).json({ error: "Failed to fetch Thirukural", detail: err.message });
   }
 });
 
-// Health check
+app.get("/clear-cache", (req, res) => {
+  imageCache.flushAll();
+  kuralCache.flushAll();
+  res.json({ status: "cache cleared" });
+});
+
 app.get("/", (req, res) =>
   res.json({ status: "ok", plugin: "Thirukural TRMNL", today: dailyKuralNumber() })
 );
