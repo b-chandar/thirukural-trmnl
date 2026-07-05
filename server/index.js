@@ -83,13 +83,10 @@ async function generateImage(kural) {
     }
   );
 
-      const item = response.data?.data?.[0];
-  let url = item?.url || null;
-  // If model returns base64, convert to data URI
-  if (!url && item?.b64_json) {
-    url = `data:image/jpeg;base64,${item.b64_json}`;
-  }
-  console.log("Image URL obtained:", url ? "yes" : "no");
+        const item = response.data?.data?.[0];
+  const url = item?.url || null;
+  // Only use hosted URLs — base64 is too large for TRMNL
+  console.log("Image URL obtained:", url ? url : "none");
   if (url) imageCache.set(cacheKey, url);
   return url;
 }
