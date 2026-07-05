@@ -67,13 +67,11 @@ async function generateImage(kural) {
   ].join(" ");
 
   const response = await axios.post(
-    "https://openrouter.ai/api/v1/images/generations",
+    "https://openrouter.ai/api/v1/images",
     {
-      model: "black-forest-labs/flux.2-klein-4b",
-      prompt,
-      n: 1,
-      size: "512x512",
-    },
+  model: "black-forest-labs/flux.2-klein-4b",
+  prompt,
+},
     {
       headers: {
         Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
