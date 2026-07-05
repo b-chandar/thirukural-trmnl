@@ -1,0 +1,18 @@
+{
+  "name": "thirukural-trmnl",
+  "version": "1.0.0",
+  "description": "TRMNL plugin backend: Thirukural of the Day with AI-generated ink sketch",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "express": "^4.19.2",
+    "node-cache": "^5.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
