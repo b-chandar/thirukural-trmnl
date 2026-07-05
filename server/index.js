@@ -83,7 +83,8 @@ async function generateImage(kural) {
     }
   );
 
-  const url = response.data?.data?.[0]?.url || null;
+    console.log("OpenRouter image response:", JSON.stringify(response.data));
+  const url = response.data?.data?.[0]?.url || response.data?.url || null;
   if (url) imageCache.set(cacheKey, url);
   return url;
 }
