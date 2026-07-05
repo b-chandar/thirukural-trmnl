@@ -69,7 +69,7 @@ async function generateImage(kural) {
   const response = await axios.post(
     "https://openrouter.ai/api/v1/images/generations",
     {
-      model: "black-forest-labs/flux-1-schnell",
+      model: "black-forest-labs/flux.2-klein-4b",
       prompt,
       n: 1,
       size: "512x512",
