@@ -14,8 +14,7 @@ const IMAGE_DIR = path.join(__dirname, "images");
 if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR);
 
 function dailyKuralNumber() {
-  const now = new Date();
-  const dayIndex = Math.floor(now.getTime() / (1000 * 60 * 60 * 24));
+  const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24));
   return (dayIndex % 1330) + 1;
 }
 
@@ -48,35 +47,52 @@ async function generateImage(kural, baseUrl) {
     "High contrast, suitable for e-ink grayscale display.",
   ].join(" ");
 
-  const response = await axios.post(
-    "https://openrouter.ai/api/v1/images",
-    { model: "bytedance-seed/seedream-4.5", prompt },
+  // Step 1: Submit to fal.ai queue
+  const submitRes = await axios.post(
+    "https://queue.fal.run/fal-ai/flux/schnell",
+    { prompt, image_size: "square", num_images: 1 },
     {
       headers: {
-        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        Authorization: `Key ${process.env.FAL_API_KEY}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://trmnl-thirukural.onrender.com",
-        "X-Title": "Thirukural TRMNL Plugin",
       },
-      timeout: 60000,
+      timeout: 30000,
     }
   );
 
-  const item = response.data?.data?.[0];
-  let hostedUrl = null;
+  const requestId = submitRes.data?.request_id;
+  if (!requestId) throw new Error("fal.ai: no request_id returned");
 
-  if (item?.url) {
-    hostedUrl = item.url;
-  } else if (item?.b64_json) {
-    const filename = `kural_${kural.number}.jpg`;
-    const filepath = path.join(IMAGE_DIR, filename);
-    fs.writeFileSync(filepath, Buffer.from(item.b64_json, "base64"));
-    hostedUrl = `${baseUrl}/image/${filename}`;
-    console.log("Saved image to disk:", filename);
+  // Step 2: Poll for result
+  let imageUrl = null;
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const statusRes = await axios.get(
+      `https://queue.fal.run/fal-ai/flux/schnell/requests/${requestId}`,
+      {
+        headers: { Authorization: `Key ${process.env.FAL_API_KEY}` },
+        timeout: 10000,
+      }
+    );
+    const status = statusRes.data?.status;
+    if (status === "COMPLETED") {
+      imageUrl = statusRes.data?.output?.images?.[0]?.url || null;
+      break;
+    } else if (status === "FAILED") {
+      throw new Error("fal.ai: generation failed");
+    }
   }
 
-  if (hostedUrl) imageCache.set(cacheKey, hostedUrl);
-  console.log("Image URL:", hostedUrl || "none");
+  if (!imageUrl) throw new Error("fal.ai: timed out waiting for image");
+
+  // Step 3: Download and save to disk (fal.ai URLs expire)
+  const imgRes = await axios.get(imageUrl, { responseType: "arraybuffer", timeout: 30000 });
+  const filename = `kural_${kural.number}.jpg`;
+  fs.writeFileSync(path.join(IMAGE_DIR, filename), Buffer.from(imgRes.data));
+  const hostedUrl = `${baseUrl}/image/${filename}`;
+
+  imageCache.set(cacheKey, hostedUrl);
+  console.log("Image saved:", filename);
   return hostedUrl;
 }
 
@@ -96,12 +112,13 @@ app.get("/data", async (req, res) => {
     const number = kural.number || num;
 
     let image_url = null;
-    if (process.env.OPENROUTER_API_KEY) {
+    if (process.env.ab418d4d-cb24-4958-9451-c44923851ae3:f4e7349eae6c81886a3b01eae988a81f) {
       try {
         const baseUrl = `${req.protocol}://${req.get("host")}`;
         image_url = await generateImage(kural, baseUrl);
       } catch (imgErr) {
         console.error("Image generation failed:", imgErr.message);
+        image_url = null;
       }
     }
 
