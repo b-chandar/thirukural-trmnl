@@ -144,6 +144,33 @@ app.get("/clear-cache", (req, res) => {
   res.json({ status: "cache cleared" });
 });
 
+// TEMPORARY: log full fal.ai error body to diagnose 403
+app.get("/debug-fal", async (req, res) => {
+  if (!process.env.FAL_API_KEY) return res.json({ error: "FAL_API_KEY not set" });
+  try {
+    const submitRes = await axios.post(
+      "https://queue.fal.run/fal-ai/flux/schnell",
+      { prompt: "a simple black and white line drawing of a tree", image_size: "square", num_images: 1 },
+      {
+        headers: {
+          Authorization: `Key ${process.env.FAL_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 30000,
+      }
+    );
+    res.json({ ok: true, request_id: submitRes.data?.request_id });
+  } catch (e) {
+    res.json({
+      error: e.message,
+      status: e.response?.status,
+      body: e.response?.data,
+      keyPreview: process.env.FAL_API_KEY.slice(0, 8) + "..." + process.env.FAL_API_KEY.slice(-4),
+      keyLength: process.env.FAL_API_KEY.length,
+    });
+  }
+});
+
 app.get("/", (req, res) =>
   res.json({ status: "ok", plugin: "Thirukural TRMNL", today: dailyKuralNumber() })
 );
