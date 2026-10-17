@@ -3,9 +3,12 @@ const axios = require("axios");
 const NodeCache = require("node-cache");
 const fs = require("fs");
 const path = require("path");
+const { fal } = require("@fal-ai/client");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+fal.config({ credentials: process.env.FAL_API_KEY });
 
 const kuralCache = new NodeCache({ stdTTL: 86400 });
 const imageCache = new NodeCache({ stdTTL: 82800 });
@@ -13,8 +16,6 @@ const imageCache = new NodeCache({ stdTTL: 82800 });
 const IMAGE_DIR = path.join(__dirname, "images");
 if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR);
 
-// The Kural API now returns chapter/section as objects: { id, names: { ta, en } }.
-// Accept both the old (string) and new (object) shape; prefer the Tamil name.
 function nameOf(v) {
   if (!v) return "";
   if (typeof v === "string") return v;
@@ -55,45 +56,21 @@ async function generateImage(kural, baseUrl) {
     "High contrast, suitable for e-ink grayscale display.",
   ].join(" ");
 
-  // Step 1: Submit to fal.ai queue
-  const submitRes = await axios.post(
-    "https://queue.fal.run/fal-ai/flux/schnell",
-    { prompt, image_size: "square", num_images: 1 },
-    {
-      headers: {
-        Authorization: `Key ${process.env.FAL_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 30000,
-    }
-  );
+  const { request_id } = await fal.queue.submit("fal-ai/flux/schnell", {
+    input: { prompt, image_size: "square", num_images: 1 },
+  });
 
-  const requestId = submitRes.data?.request_id;
-  if (!requestId) throw new Error("fal.ai: no request_id returned");
-
-  // Step 2: Poll for result
-  let imageUrl = null;
-  for (let i = 0; i < 20; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
-    const statusRes = await axios.get(
-      `https://queue.fal.run/fal-ai/flux/schnell/requests/${requestId}/status`,
-      {
-        headers: { Authorization: `Key ${process.env.FAL_API_KEY}` },
-        timeout: 10000,
-      }
-    );
-    const status = statusRes.data?.status;
-    if (status === "COMPLETED") {
-      imageUrl = statusRes.data?.output?.images?.[0]?.url || null;
-      break;
-    } else if (status === "FAILED") {
-      throw new Error("fal.ai: generation failed");
-    }
+  let status = await fal.queue.status("fal-ai/flux/schnell", { requestId: request_id });
+  while (status.status !== "COMPLETED" && status.status !== "FAILED") {
+    await new Promise((r) => setTimeout(r, 2000));
+    status = await fal.queue.status("fal-ai/flux/schnell", { requestId: request_id });
   }
+  if (status.status === "FAILED") throw new Error("fal.ai: generation failed");
 
-  if (!imageUrl) throw new Error("fal.ai: timed out waiting for image");
+  const result = await fal.queue.result("fal-ai/flux/schnell", { requestId: request_id });
+  const imageUrl = result.data?.images?.[0]?.url || null;
+  if (!imageUrl) throw new Error("fal.ai: no image URL in result");
 
-  // Step 3: Download and save to disk (fal.ai URLs expire)
   const imgRes = await axios.get(imageUrl, { responseType: "arraybuffer", timeout: 30000 });
   const filename = `kural_${kural.number}.jpg`;
   fs.writeFileSync(path.join(IMAGE_DIR, filename), Buffer.from(imgRes.data));
@@ -122,7 +99,6 @@ app.get("/data", async (req, res) => {
     let image_url = null;
     if (process.env.FAL_API_KEY) {
       try {
-        // Render terminates TLS at its proxy, so req.protocol is "http"; always use https
         const baseUrl = `https://${req.get("host")}`;
         image_url = await generateImage(kural, baseUrl);
       } catch (imgErr) {
@@ -144,30 +120,15 @@ app.get("/clear-cache", (req, res) => {
   res.json({ status: "cache cleared" });
 });
 
-// TEMPORARY: log full fal.ai error body to diagnose 403
 app.get("/debug-fal", async (req, res) => {
   if (!process.env.FAL_API_KEY) return res.json({ error: "FAL_API_KEY not set" });
   try {
-    const submitRes = await axios.post(
-      "https://queue.fal.run/fal-ai/flux/schnell",
-      { prompt: "a simple black and white line drawing of a tree", image_size: "square", num_images: 1 },
-      {
-        headers: {
-          Authorization: `Key ${process.env.FAL_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        timeout: 30000,
-      }
-    );
-    res.json({ ok: true, request_id: submitRes.data?.request_id });
-  } catch (e) {
-    res.json({
-      error: e.message,
-      status: e.response?.status,
-      body: e.response?.data,
-      keyPreview: process.env.FAL_API_KEY.slice(0, 8) + "..." + process.env.FAL_API_KEY.slice(-4),
-      keyLength: process.env.FAL_API_KEY.length,
+    const { request_id } = await fal.queue.submit("fal-ai/flux/schnell", {
+      input: { prompt: "a simple black and white line drawing of a tree", image_size: "square", num_images: 1 },
     });
+    res.json({ ok: true, request_id });
+  } catch (e) {
+    res.json({ error: e.message, status: e.status, body: e.body });
   }
 });
 
