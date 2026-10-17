@@ -13,6 +13,14 @@ const imageCache = new NodeCache({ stdTTL: 82800 });
 const IMAGE_DIR = path.join(__dirname, "images");
 if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR);
 
+// The Kural API now returns chapter/section as objects: { id, names: { ta, en } }.
+// Accept both the old (string) and new (object) shape; prefer the Tamil name.
+function nameOf(v) {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  return v.names?.ta || v.names?.en || "";
+}
+
 function dailyKuralNumber() {
   const dayIndex = Math.floor(Date.now() / (1000 * 60 * 60 * 24));
   return (dayIndex % 1330) + 1;
@@ -36,7 +44,7 @@ async function generateImage(kural, baseUrl) {
   if (cached) return cached;
 
   const englishMeaning = kural.meaning?.en || "";
-  const chapter = kural.chapter || "";
+  const chapter = nameOf(kural.chapter);
 
   const prompt = [
     "Black and white ink sketch. Fine line art on white background.",
@@ -107,14 +115,15 @@ app.get("/data", async (req, res) => {
     const line2 = lines[1] || "";
     const meaning_en = kural.meaning?.en || "";
     const meaning_ta = kural.meaning?.ta_mu_va || kural.meaning?.ta_salamon || "";
-    const chapter = kural.chapter || "";
-    const section = kural.section || "";
+    const chapter = nameOf(kural.chapter);
+    const section = nameOf(kural.section);
     const number = kural.number || num;
 
     let image_url = null;
-    if (process.env.ab418d4d-cb24-4958-9451-c44923851ae3:f4e7349eae6c81886a3b01eae988a81f) {
+    if (process.env.FAL_API_KEY) {
       try {
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        // Render terminates TLS at its proxy, so req.protocol is "http"; always use https
+        const baseUrl = `https://${req.get("host")}`;
         image_url = await generateImage(kural, baseUrl);
       } catch (imgErr) {
         console.error("Image generation failed:", imgErr.message);
