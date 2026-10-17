@@ -76,7 +76,7 @@ async function generateImage(kural, baseUrl) {
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     const statusRes = await axios.get(
-      `https://queue.fal.run/fal-ai/flux/schnell/requests/${requestId}`,
+      `https://queue.fal.run/fal-ai/flux/schnell/requests/${requestId}/status`,
       {
         headers: { Authorization: `Key ${process.env.FAL_API_KEY}` },
         timeout: 10000,
